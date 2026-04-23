@@ -178,7 +178,7 @@ jobs:
           format: table
           exit-code: "1"
 
-      - name: Scan worker image (CRITICAL fail gate)
+      - name: Scan worker image (SARIF report, non-blocking)
         uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
@@ -186,9 +186,18 @@ jobs:
           severity: CRITICAL
           format: sarif
           output: trivy-worker.sarif
+          exit-code: "0"
+
+      - name: Show worker CRITICAL vulns (table)
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ github.sha }}
+          severity: CRITICAL
+          format: table
           exit-code: "1"
 
-      - name: Scan frontend image (CRITICAL fail gate)
+      - name: Scan frontend image (SARIF report, non-blocking)
         uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
@@ -196,6 +205,15 @@ jobs:
           severity: CRITICAL
           format: sarif
           output: trivy-frontend.sarif
+          exit-code: "0"
+
+      - name: Show frontend CRITICAL vulns (table)
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+          severity: CRITICAL
+          format: table
           exit-code: "1"
 
       - name: Upload Trivy SARIF artifacts
