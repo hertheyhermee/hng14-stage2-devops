@@ -100,4 +100,5 @@ services:
 networks:
   app_net:
     name: hng14_internal_net
-    internal: true
+    # Keep a named private network for service-to-service traffic.
+    # Not marked "internal: true" so the CI runner can reach published ports.
