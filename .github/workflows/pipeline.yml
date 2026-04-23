@@ -169,6 +169,16 @@ jobs:
           output: trivy-api.sarif
           exit-code: "1"
 
+      - name: Show API CRITICAL vulns (table)
+        if: always()
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ github.sha }}
+          severity: CRITICAL
+          format: table
+          exit-code: "0"
+
       - name: Scan worker image (CRITICAL fail gate)
         uses: aquasecurity/trivy-action@v0.24.0
         with:
