@@ -1,0 +1,103 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    cpus: "${REDIS_CPUS:-0.50}"
+    mem_limit: "${REDIS_MEM_LIMIT:-256m}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPUS:-0.50}"
+          memory: "${REDIS_MEM_LIMIT:-256m}"
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    environment:
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app_net
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    cpus: "${API_CPUS:-0.50}"
+    mem_limit: "${API_MEM_LIMIT:-256m}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPUS:-0.50}"
+          memory: "${API_MEM_LIMIT:-256m}"
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    environment:
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, redis; redis.from_url(os.getenv('REDIS_URL')).ping()"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    cpus: "${WORKER_CPUS:-0.50}"
+    mem_limit: "${WORKER_MEM_LIMIT:-256m}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${WORKER_CPUS:-0.50}"
+          memory: "${WORKER_MEM_LIMIT:-256m}"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      API_URL: "${API_URL:-http://api:8000}"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - app_net
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    cpus: "${FRONTEND_CPUS:-0.50}"
+    mem_limit: "${FRONTEND_MEM_LIMIT:-256m}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${FRONTEND_CPUS:-0.50}"
+          memory: "${FRONTEND_MEM_LIMIT:-256m}"
+
+networks:
+  app_net:
+    name: hng14_internal_net
+    internal: true

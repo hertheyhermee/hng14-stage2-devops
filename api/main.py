@@ -5,7 +5,18 @@ import os
 
 app = FastAPI()
 
-r = redis.Redis(host="localhost", port=6379)
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+
+try:
+    r = redis.from_url(redis_url)
+    r.ping()
+except Exception as e:
+    raise Exception(f"Failed to connect to Redis: {e}")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 @app.post("/jobs")
 def create_job():

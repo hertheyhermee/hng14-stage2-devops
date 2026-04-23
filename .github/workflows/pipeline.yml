@@ -1,0 +1,257 @@
+name: stage2-devops-pipeline
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+env:
+  REGISTRY: localhost:5000
+  IMAGE_PREFIX: hng14-stage2-devops
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r api/requirements-dev.txt
+
+      - name: Run flake8
+        run: flake8 api
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run eslint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Run hadolint on Dockerfiles
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: api/Dockerfile
+
+      - name: Run hadolint on worker Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: worker/Dockerfile
+
+      - name: Run hadolint on frontend Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: frontend/Dockerfile
+
+  test:
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r api/requirements.txt -r api/requirements-dev.txt
+
+      - name: Run pytest with coverage
+        run: python -m pytest --cov=. --cov-report=xml
+        working-directory: api
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage-xml
+          path: api/coverage.xml
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image variables
+        run: |
+          echo "API_IMAGE=${REGISTRY}/${IMAGE_PREFIX}-api" >> $GITHUB_ENV
+          echo "WORKER_IMAGE=${REGISTRY}/${IMAGE_PREFIX}-worker" >> $GITHUB_ENV
+          echo "FRONTEND_IMAGE=${REGISTRY}/${IMAGE_PREFIX}-frontend" >> $GITHUB_ENV
+
+      - name: Build and push API image
+        run: |
+          docker build -t ${API_IMAGE}:${GITHUB_SHA} -t ${API_IMAGE}:latest api
+          docker push ${API_IMAGE}:${GITHUB_SHA}
+          docker push ${API_IMAGE}:latest
+
+      - name: Build and push worker image
+        run: |
+          docker build -t ${WORKER_IMAGE}:${GITHUB_SHA} -t ${WORKER_IMAGE}:latest worker
+          docker push ${WORKER_IMAGE}:${GITHUB_SHA}
+          docker push ${WORKER_IMAGE}:latest
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t ${FRONTEND_IMAGE}:${GITHUB_SHA} -t ${FRONTEND_IMAGE}:latest frontend
+          docker push ${FRONTEND_IMAGE}:${GITHUB_SHA}
+          docker push ${FRONTEND_IMAGE}:latest
+
+      - name: Export images as artifacts for downstream jobs
+        run: |
+          docker pull ${API_IMAGE}:${GITHUB_SHA}
+          docker pull ${WORKER_IMAGE}:${GITHUB_SHA}
+          docker pull ${FRONTEND_IMAGE}:${GITHUB_SHA}
+          docker save ${API_IMAGE}:${GITHUB_SHA} -o api-image.tar
+          docker save ${WORKER_IMAGE}:${GITHUB_SHA} -o worker-image.tar
+          docker save ${FRONTEND_IMAGE}:${GITHUB_SHA} -o frontend-image.tar
+
+      - name: Upload image tar artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-images
+          path: |
+            api-image.tar
+            worker-image.tar
+            frontend-image.tar
+
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download image tar artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: built-images
+
+      - name: Load images
+        run: |
+          docker load -i api-image.tar
+          docker load -i worker-image.tar
+          docker load -i frontend-image.tar
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.2
+
+      - name: Scan API image (CRITICAL fail gate)
+        run: |
+          trivy image --severity CRITICAL --format sarif --output trivy-api.sarif ${REGISTRY}/${IMAGE_PREFIX}-api:${GITHUB_SHA}
+          trivy image --severity CRITICAL --exit-code 1 ${REGISTRY}/${IMAGE_PREFIX}-api:${GITHUB_SHA}
+
+      - name: Scan worker image (CRITICAL fail gate)
+        run: |
+          trivy image --severity CRITICAL --format sarif --output trivy-worker.sarif ${REGISTRY}/${IMAGE_PREFIX}-worker:${GITHUB_SHA}
+          trivy image --severity CRITICAL --exit-code 1 ${REGISTRY}/${IMAGE_PREFIX}-worker:${GITHUB_SHA}
+
+      - name: Scan frontend image (CRITICAL fail gate)
+        run: |
+          trivy image --severity CRITICAL --format sarif --output trivy-frontend.sarif ${REGISTRY}/${IMAGE_PREFIX}-frontend:${GITHUB_SHA}
+          trivy image --severity CRITICAL --exit-code 1 ${REGISTRY}/${IMAGE_PREFIX}-frontend:${GITHUB_SHA}
+
+      - name: Upload Trivy SARIF artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-sarif-reports
+          path: |
+            trivy-api.sarif
+            trivy-worker.sarif
+            trivy-frontend.sarif
+
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: security-scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create test env file
+        run: cp .env.example .env
+
+      - name: Start full stack
+        run: docker compose up -d --build
+
+      - name: Wait for frontend to be healthy
+        run: |
+          timeout 120 bash -c 'until curl -fsS http://localhost:3000/health; do sleep 2; done'
+
+      - name: Submit job and poll until complete
+        run: |
+          JOB_ID=$(curl -fsS -X POST http://localhost:3000/submit | python -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+          echo "Submitted job: ${JOB_ID}"
+          timeout 120 bash -c "until [ \"\$(curl -fsS http://localhost:3000/status/${JOB_ID} | python -c 'import sys,json; print(json.load(sys.stdin).get(\"status\", \"\"))')\" = \"completed\" ]; do sleep 2; done"
+          FINAL_STATUS=$(curl -fsS http://localhost:3000/status/${JOB_ID} | python -c "import sys,json; print(json.load(sys.stdin).get('status', ''))")
+          test "${FINAL_STATUS}" = "completed"
+
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: integration-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build current API image for deploy simulation
+        run: docker build -t ${IMAGE_PREFIX}-api:${GITHUB_SHA} api
+
+      - name: Rolling update simulation with health gate
+        run: |
+          docker network create deploy-net || true
+
+          # Old version currently serving traffic.
+          docker rm -f api-old api-new redis-deploy >/dev/null 2>&1 || true
+          docker run -d --name redis-deploy --network deploy-net redis:7-alpine
+          docker run -d --name api-old --network deploy-net -p 8000:8000 -e REDIS_URL=redis://redis-deploy:6379 ${IMAGE_PREFIX}-api:${GITHUB_SHA}
+
+          # Candidate new version starts without replacing old one.
+          docker run -d --name api-new --network deploy-net -p 8001:8000 -e REDIS_URL=redis://redis-deploy:6379 ${IMAGE_PREFIX}-api:${GITHUB_SHA}
+
+          # Health gate: new must become healthy within 60s.
+          timeout 60 bash -c 'until curl -fsS http://localhost:8001/health; do sleep 2; done'
+
+          # Swap only after health gate passes.
+          docker rm -f api-old
+          docker rename api-new api-old
+
+      - name: Cleanup deploy simulation
+        if: always()
+        run: |
+          docker rm -f api-old api-new redis-deploy >/dev/null 2>&1 || true
+          docker network rm deploy-net >/dev/null 2>&1 || true

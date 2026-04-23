@@ -3,7 +3,8 @@ import time
 import os
 import signal
 
-r = redis.Redis(host="localhost", port=6379)
+redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+r = redis.from_url(redis_url)
 
 def process_job(job_id):
     print(f"Processing job {job_id}")
