@@ -159,23 +159,35 @@ jobs:
           docker load -i worker-image.tar
           docker load -i frontend-image.tar
 
-      - name: Install Trivy
-        uses: aquasecurity/setup-trivy@v0.2.2
-
       - name: Scan API image (CRITICAL fail gate)
-        run: |
-          trivy image --severity CRITICAL --format sarif --output trivy-api.sarif ${REGISTRY}/${IMAGE_PREFIX}-api:${GITHUB_SHA}
-          trivy image --severity CRITICAL --exit-code 1 ${REGISTRY}/${IMAGE_PREFIX}-api:${GITHUB_SHA}
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ github.sha }}
+          severity: CRITICAL
+          format: sarif
+          output: trivy-api.sarif
+          exit-code: "1"
 
       - name: Scan worker image (CRITICAL fail gate)
-        run: |
-          trivy image --severity CRITICAL --format sarif --output trivy-worker.sarif ${REGISTRY}/${IMAGE_PREFIX}-worker:${GITHUB_SHA}
-          trivy image --severity CRITICAL --exit-code 1 ${REGISTRY}/${IMAGE_PREFIX}-worker:${GITHUB_SHA}
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ github.sha }}
+          severity: CRITICAL
+          format: sarif
+          output: trivy-worker.sarif
+          exit-code: "1"
 
       - name: Scan frontend image (CRITICAL fail gate)
-        run: |
-          trivy image --severity CRITICAL --format sarif --output trivy-frontend.sarif ${REGISTRY}/${IMAGE_PREFIX}-frontend:${GITHUB_SHA}
-          trivy image --severity CRITICAL --exit-code 1 ${REGISTRY}/${IMAGE_PREFIX}-frontend:${GITHUB_SHA}
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+          severity: CRITICAL
+          format: sarif
+          output: trivy-frontend.sarif
+          exit-code: "1"
 
       - name: Upload Trivy SARIF artifacts
         uses: actions/upload-artifact@v4
