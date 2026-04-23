@@ -159,7 +159,7 @@ jobs:
           docker load -i worker-image.tar
           docker load -i frontend-image.tar
 
-      - name: Scan API image (CRITICAL fail gate)
+      - name: Scan API image (SARIF report, non-blocking)
         uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
@@ -167,17 +167,16 @@ jobs:
           severity: CRITICAL
           format: sarif
           output: trivy-api.sarif
-          exit-code: "1"
+          exit-code: "0"
 
       - name: Show API CRITICAL vulns (table)
-        if: always()
         uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ github.sha }}
           severity: CRITICAL
           format: table
-          exit-code: "0"
+          exit-code: "1"
 
       - name: Scan worker image (CRITICAL fail gate)
         uses: aquasecurity/trivy-action@v0.24.0
