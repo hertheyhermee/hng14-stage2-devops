@@ -160,7 +160,7 @@ jobs:
           docker load -i frontend-image.tar
 
       - name: Scan API image (CRITICAL fail gate)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-api:${{ github.sha }}
@@ -170,7 +170,7 @@ jobs:
           exit-code: "1"
 
       - name: Scan worker image (CRITICAL fail gate)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${{ github.sha }}
@@ -180,7 +180,7 @@ jobs:
           exit-code: "1"
 
       - name: Scan frontend image (CRITICAL fail gate)
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.24.0
         with:
           scan-type: image
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
